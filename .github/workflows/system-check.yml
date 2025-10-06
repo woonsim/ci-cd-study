@@ -1,0 +1,24 @@
+name: System Check Workflow
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  check-environment:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Step 1 - Check out code
+        uses: actions/checkout@v4
+
+      - name: Step 2 - Show current environment
+        run: |
+          echo "🧠 Running on:"
+          uname -a
+          echo "🐍 Python version:"
+          python3 --version || echo "Python not installed"
+          echo "📦 Installed packages (first 5):"
+          dpkg --get-selections | head -n 5
+
+      - name: Step 3 - Print workspace structure
+        run: ls -al
