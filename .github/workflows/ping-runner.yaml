@@ -1,0 +1,12 @@
+name: Ping Runner
+on: workflow_dispatch  # 수동 실행 가능
+
+jobs:
+  test:
+    runs-on: [self-hosted, linux]  # 러너 라벨
+    steps:
+      - name: Test connection
+        run: |
+          echo "Runner is working fine on $(hostname)"
+          docker --version || echo "Docker not found"
+          echo "Current time:" $(date)
