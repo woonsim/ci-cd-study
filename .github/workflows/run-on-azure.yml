@@ -19,15 +19,24 @@ jobs:
       - name: Pull PyTorch base image
         run: docker pull cnstark/pytorch:2.3.1-py3.10.15-cuda12.1.0-ubuntu22.04
 
+      - name: Clean previous cache (optional but recommended)
+        run: sudo rm -rf ${{ github.workspace }}/.cache || true
+
       # 3️⃣ 학습 스크립트 실행
-      - name: Run training inside Docker (non-root + venv)
+      - name: Run training inside Docker (non-root + venv, fixed caches)
         run: |
-          mkdir -p outputs .cache/huggingface
+          mkdir -p outputs
           docker run --rm -u $(id -u):$(id -g) \
+            -e HOME=/workspace \
+            -e TRANSFORMERS_CACHE=/workspace/.cache/huggingface \
+            -e HF_HOME=/workspace/.cache/huggingface \
+            -e HUGGINGFACE_HUB_CACHE=/workspace/.cache/huggingface \
+            -e PIP_CACHE_DIR=/workspace/.cache/pip \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             cnstark/pytorch:2.3.1-py3.10.15-cuda12.1.0-ubuntu22.04 \
-            bash -lc "python -m venv .venv && \
+            bash -lc "mkdir -p .cache/huggingface .cache/pip && \
+                      python -m venv .venv && \
                       . .venv/bin/activate && \
                       python -m pip install -q --upgrade pip && \
                       pip install -q transformers==4.44.0 Pillow==10.3.0 tqdm==4.66.5 timm==1.0.9 && \
