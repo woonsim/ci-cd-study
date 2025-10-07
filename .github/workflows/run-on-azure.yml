@@ -20,18 +20,20 @@ jobs:
         run: docker pull cnstark/pytorch:2.3.1-py3.10.15-cuda12.1.0-ubuntu22.04
 
       # 3️⃣ 학습 스크립트 실행
-      - name: Run training inside Docker
+      - name: Run training inside Docker (root, cache outside repo)
         run: |
-          mkdir -p outputs .cache/huggingface
+          mkdir -p outputs
+          mkdir -p ${{ runner.temp }}/hf  # 리포 바깥 캐시 경로
+
           docker run --rm \
-            -u $(id -u):$(id -g) \
             -v ${{ github.workspace }}:/workspace \
-            -v ${{ github.workspace }}/.cache/huggingface:/root/.cache/huggingface \
+            -v ${{ runner.temp }}/hf:/root/.cache/huggingface \
             -w /workspace \
             cnstark/pytorch:2.3.1-py3.10.15-cuda12.1.0-ubuntu22.04 \
             bash -lc "python -m pip install -q --upgrade pip && \
                       pip install --root-user-action=ignore -q transformers==4.44.0 Pillow==10.3.0 tqdm==4.66.5 timm==1.0.9 && \
                       SMOKE_STEPS=10 python scripts/train_smoke_detr.py"
+
 
 
       # 4️⃣ 학습 결과 업로드
