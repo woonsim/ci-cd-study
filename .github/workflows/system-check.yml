@@ -13,11 +13,11 @@ jobs:
 
       - name: Step 2 - Show current environment
         run: |
-          echo "🧠 Running on:"
+          echo "Running on:"
           uname -a
-          echo "🐍 Python version:"
+          echo "Python version:"
           python3 --version || echo "Python not installed"
-          echo "📦 Installed packages (first 5):"
+          echo "Installed packages (first 5):"
           dpkg --get-selections | head -n 5
 
       - name: Step 3 - Print workspace structure
