@@ -1,4 +1,4 @@
-name: Run Training on Azure
+name: Run Training on Azure (with cnstark/pytorch base)
 
 on:
   workflow_dispatch:   # 수동 실행
@@ -8,7 +8,7 @@ on:
 
 jobs:
   train:
-    runs-on: [self-hosted, linux]  # Azure VM 러너 사용
+    runs-on: [self-hosted, linux]   # Azure VM runner 사용
 
     steps:
       # 1️⃣ 코드 내려받기
@@ -17,19 +17,20 @@ jobs:
 
       # 2️⃣ 베이스 이미지 받기
       - name: Pull PyTorch base image
-        run: docker pull pytorch/pytorch:2.3.0-cpu
+        run: docker pull cnstark/pytorch:2.3.1-py3.10.15-cuda12.1.0-ubuntu22.04
 
       # 3️⃣ 학습 스크립트 실행
       - name: Run training inside Docker
         run: |
           mkdir -p outputs .cache/huggingface
           docker run --rm \
+            --gpus all \                                      # GPU 지원 (없으면 제거)
             -v ${{ github.workspace }}:/workspace \
             -v ${{ github.workspace }}/.cache/huggingface:/root/.cache/huggingface \
             -w /workspace \
-            pytorch/pytorch:2.3.0-cpu \
+            cnstark/pytorch:2.3.1-py3.10.15-cuda12.1.0-ubuntu22.04 \
             bash -lc '
-              pip install -q --upgrade pip &&
+              python -m pip install -q --upgrade pip &&
               pip install -q transformers==4.44.0 Pillow==10.3.0 tqdm==4.66.5 &&
               SMOKE_STEPS=10 python scripts/train_smoke_detr.py
             '
