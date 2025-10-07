@@ -1,0 +1,42 @@
+name: Env Setup Cache Benchmark
+
+on:
+  push:
+    branches: [ main ]   # main에 푸시될 때 실행
+  workflow_dispatch:      # Actions 화면에서 수동 실행 버튼
+
+jobs:
+  cache-benchmark:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # pip 캐시 자동 사용 (requirements.txt 기반)
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10.14"
+          cache: "pip"
+          cache-dependency-path: "requirements.txt"
+
+      - name: Create venv
+        run: python -m venv .venv
+
+      - name: Install deps & measure
+        run: |
+          source .venv/bin/activate
+          START=$(date +%s)
+          pip install -r requirements.txt
+          END=$(date +%s)
+          echo "INSTALL_SECONDS=$((END-START))" >> $GITHUB_ENV
+          echo "Install seconds: $((END-START))"
+
+      - name: Save metrics to CSV
+        run: |
+          echo "run_id,python,install_seconds,cache_key" > metrics.csv
+          echo "${{ github.run_id }},3.10.14,${{ env.INSTALL_SECONDS }},pip:${{ hashFiles('requirements.txt') }}" >> metrics.csv
+
+      - name: Upload metrics
+        uses: actions/upload-artifact@v4
+        with:
+          name: cache-benchmark
+          path: metrics.csv
