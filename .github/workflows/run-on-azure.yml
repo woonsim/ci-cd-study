@@ -23,18 +23,15 @@ jobs:
       - name: Run training inside Docker
         run: |
           mkdir -p outputs .cache/huggingface
-          docker run --rm \
-            --gpus all \                                      # GPU 지원 (없으면 제거)
+          docker run --rm --gpus all \
             -v ${{ github.workspace }}:/workspace \
             -v ${{ github.workspace }}/.cache/huggingface:/root/.cache/huggingface \
             -w /workspace \
             cnstark/pytorch:2.3.1-py3.10.15-cuda12.1.0-ubuntu22.04 \
-            bash -lc '
-              python -m pip install -q --upgrade pip &&
-              pip install -q transformers==4.44.0 Pillow==10.3.0 tqdm==4.66.5 &&
-              SMOKE_STEPS=10 python scripts/train_smoke_detr.py
-            '
-
+            bash -lc "python -m pip install -q --upgrade pip && \
+                      pip install -q transformers==4.44.0 Pillow==10.3.0 tqdm==4.66.5 && \
+                      SMOKE_STEPS=10 python scripts/train_smoke_detr.py"
+                      
       # 4️⃣ 학습 결과 업로드
       - name: Upload outputs as artifacts
         uses: actions/upload-artifact@v4
