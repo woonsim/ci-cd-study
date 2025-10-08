@@ -5,6 +5,10 @@ on:
   push:
     branches:
       - main           # main 브랜치에 push 시 자동 실행
+      
+permissions:
+  id-token: write     # OIDC 토큰 권한
+  contents: read      # repo 읽기(checkout 등)
 
 jobs:
   train:
