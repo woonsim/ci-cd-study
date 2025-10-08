@@ -48,3 +48,35 @@ jobs:
         with:
           name: training-outputs
           path: outputs/
+          
+      # 5️⃣ (선택) 업로드 경로 버저닝: branch/sha/timestamp
+      - name: Set versioned path
+        shell: bash
+        run: |
+          echo "TS=$(date -u +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
+          echo "DEST=models/${{ github.ref_name }}/${{ github.sha }}/${TS}" >> $GITHUB_ENV
+
+      # 6️⃣ outputs -> Azure Blob 업로드 (Access Key 방식)
+      - name: Upload outputs to Azure Blob
+        uses: azure/CLI@v2
+        with:
+          inlineScript: |
+            az storage blob upload-batch \
+              --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+              --account-key  ${{ secrets.AZURE_STORAGE_KEY }} \
+              --destination  ${{ secrets.AZURE_CONTAINER }} \
+              --destination-path "${{ env.DEST }}" \
+              --source outputs \
+              --overwrite true
+
+      # 7️⃣ 업로드 검증(리스트 확인)
+      - name: Verify uploaded blobs
+        uses: azure/CLI@v2
+        with:
+          inlineScript: |
+            az storage blob list \
+              --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+              --account-key  ${{ secrets.AZURE_STORAGE_KEY }} \
+              --container-name ${{ secrets.AZURE_CONTAINER }} \
+              --prefix "${{ env.DEST }}/" \
+              --query "[].name"
