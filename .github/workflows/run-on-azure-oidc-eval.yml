@@ -1,0 +1,127 @@
+name: Run Training on Azure (Evaluate)
+
+on:
+  workflow_dispatch:   # 수동 실행
+  push:
+    branches: [ main ] # main 브랜치에 push 시 자동 실행
+
+# ✅ OIDC 토큰 발급 권한(반드시 필요)
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  train:
+    runs-on: [self-hosted, linux]   # Azure VM runner 사용
+
+    steps:
+      # 0) (선택) Azure CLI 설치 확인/설치 — self-hosted 러너라면 필요할 수 있음
+      - name: Ensure Azure CLI exists
+        run: |
+          if ! command -v az >/dev/null 2>&1; then
+            echo "Installing Azure CLI..."
+            curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+          else
+            echo "Azure CLI already installed"
+          fi
+
+      # 1) 코드 내려받기
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2) 베이스 이미지 받기
+      - name: Pull PyTorch base image
+        run: docker pull cnstark/pytorch:2.3.1-py3.10.15-cuda12.1.0-ubuntu22.04
+
+      # 3) 이전 캐시 폴더 정리(권한 꼬임 방지)
+      - name: Clean previous cache (optional)
+        run: sudo rm -rf ${{ github.workspace }}/.cache || true
+
+      # 4) 학습 실행 (컨테이너 내부: venv + 고정 캐시 경로)
+      - name: Run training inside Docker (non-root + venv, fixed caches)
+        run: |
+          mkdir -p outputs
+          docker run --rm -u $(id -u):$(id -g) \
+            -e HOME=/workspace \
+            -e TRANSFORMERS_CACHE=/workspace/.cache/huggingface \
+            -e HF_HOME=/workspace/.cache/huggingface \
+            -e HUGGINGFACE_HUB_CACHE=/workspace/.cache/huggingface \
+            -e PIP_CACHE_DIR=/workspace/.cache/pip \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            cnstark/pytorch:2.3.1-py3.10.15-cuda12.1.0-ubuntu22.04 \
+            bash -lc "mkdir -p .cache/huggingface .cache/pip && \
+                      python -m venv .venv && \
+                      . .venv/bin/activate && \
+                      python -m pip install -q --upgrade pip && \
+                      pip install -q transformers==4.44.0 Pillow==10.3.0 tqdm==4.66.5 timm==1.0.9 scipy==1.13.0 && \
+                      SMOKE_STEPS=10 python scripts/train_smoke_detr.py"
+
+      # 4.5) 평가/게이트: 기준 미달이면 실패 처리(exit 1)
+      - name: Evaluate & gate
+        shell: bash
+        run: |
+          . .venv/bin/activate 2>/dev/null || true
+          python scripts/eval.py \
+            --metrics "outputs/metrics_*.json" \
+            --loss-threshold 10.0
+
+      # 5) 학습 결과를 GitHub Artifacts로 보관
+      - name: Upload outputs as artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: training-outputs
+          path: outputs/
+
+      # 6) (권한 꼬임 방지) Azure CLI 세션 디렉터리 지정
+      - name: Prepare AZURE_CONFIG_DIR
+        if: success()
+        run: |
+          echo "AZURE_CONFIG_DIR=${{ runner.temp }}/azcfg" >> $GITHUB_ENV
+          mkdir -p "${{ runner.temp }}/azcfg"
+
+      # 7) OIDC 로그인 (키리스)
+      - name: Azure login (OIDC)
+        if: success()
+        uses: azure/login@v1
+        with:
+          client-id:       ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id:       ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # 8) 업로드 경로 버저닝 (branch / sha / timestamp)
+      - name: Set versioned path
+        if: success()
+        shell: bash
+        run: |
+          echo "TS=$(date -u +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
+          echo "DEST=models/${{ github.ref_name }}/${{ github.sha }}/${TS}" >> $GITHUB_ENV
+          echo "DEST=${{ env.DEST }}"
+
+      # 9) OIDC로 Azure Blob 업로드
+      - name: Upload outputs to Azure Blob (OIDC keyless)
+        if: success()
+        uses: azure/CLI@v2
+        with:
+          inlineScript: |
+            az storage blob upload-batch \
+              --auth-mode login \
+              --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+              --destination  ${{ secrets.AZURE_CONTAINER }} \
+              --destination-path "${{ env.DEST }}" \
+              --source outputs \
+              --overwrite true
+
+      # 10) 업로드 검증
+      - name: Verify uploaded blobs (OIDC)
+        if: success()
+        uses: azure/CLI@v2
+        with:
+          inlineScript: |
+            az storage blob list \
+              --auth-mode login \
+              --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+              --container-name ${{ secrets.AZURE_CONTAINER }} \
+              --prefix "${{ env.DEST }}/" \
+              --query "[].name"
