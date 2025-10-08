@@ -1,0 +1,92 @@
+name: Run Training on Azure (with cnstark/pytorch base)
+
+on:
+  workflow_dispatch:   # 수동 실행
+  push:
+    branches:
+      - main           # main 브랜치에 push 시 자동 실행
+
+jobs:
+  train:
+    runs-on: [self-hosted, linux]   # Azure VM runner 사용
+
+    steps:
+      # 1️⃣ 코드 내려받기
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2️⃣ 베이스 이미지 받기
+      - name: Pull PyTorch base image
+        run: docker pull cnstark/pytorch:2.3.1-py3.10.15-cuda12.1.0-ubuntu22.04
+
+      - name: Clean previous cache (optional but recommended)
+        run: sudo rm -rf ${{ github.workspace }}/.cache || true
+
+      # 3️⃣ 학습 스크립트 실행
+      - name: Run training inside Docker (non-root + venv, fixed caches)
+        run: |
+          mkdir -p outputs
+          docker run --rm -u $(id -u):$(id -g) \
+            -e HOME=/workspace \
+            -e TRANSFORMERS_CACHE=/workspace/.cache/huggingface \
+            -e HF_HOME=/workspace/.cache/huggingface \
+            -e HUGGINGFACE_HUB_CACHE=/workspace/.cache/huggingface \
+            -e PIP_CACHE_DIR=/workspace/.cache/pip \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            cnstark/pytorch:2.3.1-py3.10.15-cuda12.1.0-ubuntu22.04 \
+            bash -lc "mkdir -p .cache/huggingface .cache/pip && \
+                      python -m venv .venv && \
+                      . .venv/bin/activate && \
+                      python -m pip install -q --upgrade pip && \
+                      pip install -q transformers==4.44.0 Pillow==10.3.0 tqdm==4.66.5 timm==1.0.9 scipy==1.13.0 && \
+                      SMOKE_STEPS=10 python scripts/train_smoke_detr.py"
+
+      # 4️⃣ 학습 결과 업로드
+      - name: Upload outputs as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: training-outputs
+          path: outputs/
+          
+      # OIDC 로그인 (키리스)
+      - name: Azure login (OIDC)
+        uses: azure/login@v1
+        with:
+          client-id:      ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id:      ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id:${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # 버저닝 경로 설정(예시)
+      - name: Set versioned path
+        shell: bash
+        run: |
+          echo "TS=$(date -u +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
+          echo "DEST=models/${{ github.ref_name }}/${{ github.sha }}/${TS}" >> $GITHUB_ENV
+
+      # 키리스 업로드 (auth-mode=login)
+      - name: Upload outputs to Azure Blob (OIDC keyless)
+        uses: azure/CLI@v2
+        with:
+          inlineScript: |
+            az storage blob upload-batch \
+              --auth-mode login \
+              --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+              --destination  ${{ secrets.AZURE_CONTAINER }} \
+              --destination-path "${{ env.DEST }}" \
+              --source outputs \
+              --overwrite true
+
+      # 검증
+      - name: Verify uploaded blobs (OIDC)
+        uses: azure/CLI@v2
+        with:
+          inlineScript: |
+            az storage blob list \
+              --auth-mode login \
+              --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+              --container-name ${{ secrets.AZURE_CONTAINER }} \
+              --prefix "${{ env.DEST }}/" \
+              --query "[].name"
+
+
